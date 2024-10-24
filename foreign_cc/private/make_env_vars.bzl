@@ -19,10 +19,7 @@ def get_make_env_vars(
     if "RANLIB" not in vars.keys():
         vars["RANLIB"] = [":"]
 
-    if "LDFLAGS" in vars.keys():
-        vars["LDFLAGS"] = vars["LDFLAGS"] + deps_flags.libs
-    else:
-        vars["LDFLAGS"] = deps_flags.libs
+    ldflags = vars.pop("LDFLAGS", []) + deps_flags.libs
 
     # -I flags should be put into preprocessor flags, CPPFLAGS
     # https://www.gnu.org/software/autoconf/manual/autoconf-2.63/html_node/Preset-Output-Variables.html
@@ -31,8 +28,11 @@ def get_make_env_vars(
     else:
         vars["CPPFLAGS"] = deps_flags.flags
 
-    return " ".join(["{}=\"{}\""
-        .format(key, _join_flags_list(workspace_name, vars[key])) for key in vars])
+    return " ".join(
+        ["{}=\"{}\"".format(key, _join_flags_list(workspace_name, vars[key])) for key in vars] +
+        ["LDFLAGS=\"{} {}\""
+            .format(_join_flags_list(workspace_name, ldflags), " ".join(deps_flags.linkopts))]
+    )
 
 def _define_deps_flags(deps, inputs):
     # It is very important to keep the order for the linker => put them into list
@@ -62,6 +62,7 @@ def _define_deps_flags(deps, inputs):
     # Since we need the names of include and lib directories under
     # the $EXT_BUILD_DEPS/<lib_name>, we ask the provider.
     gen_dirs_set = {}
+    linkopts = []
     for dep in deps:
         external_deps = get_foreign_cc_dep(dep)
         if external_deps:
@@ -72,10 +73,14 @@ def _define_deps_flags(deps, inputs):
                     dir_name = artifact.gen_dir.basename
                     include_dirs.append("-I$$EXT_BUILD_DEPS$$/{}/{}".format(dir_name, artifact.include_dir_name))
                     lib_dirs.append("-L$$EXT_BUILD_DEPS$$/{}/{}".format(dir_name, artifact.lib_dir_name))
+        if CcInfo in dep:
+            for l in dep[CcInfo].linking_context.linker_inputs.to_list():
+                linkopts.append(" ".join(l.user_link_flags))
 
     return struct(
         libs = lib_dirs,
         flags = include_dirs,
+        linkopts = linkopts,
     )
 
 # See https://www.gnu.org/software/make/manual/html_node/Implicit-Variables.html
